@@ -63,9 +63,15 @@ cmd_start() {
         [ -z "$pkg" ] || [ -z "$exe" ] && continue
 
         local pid_file="$PID_DIR/$exe.pid"
-        if [ -f "$pid_file" ] && kill -0 "$(cat "$pid_file")" 2>/dev/null; then
-            echo "[SKIP] $exe 已在运行 (PID $(cat "$pid_file"))"
-            continue
+        if [ -f "$pid_file" ]; then
+            local old_pid
+            old_pid=$(cat "$pid_file")
+            if kill -0 "$old_pid" 2>/dev/null || ps -p "$old_pid" > /dev/null 2>&1; then
+                echo "[SKIP] $exe 已在运行 (PID $old_pid)"
+                continue
+            else
+                rm -f "$pid_file"
+            fi
         fi
 
         if [ -n "$wait_topic" ]; then
@@ -75,7 +81,8 @@ cmd_start() {
         local log_file="$LOG_DIR/$exe.log"
         echo "--- 启动于 $(date '+%Y-%m-%d %H:%M:%S') ---" >> "$log_file"
 
-        ros2 run "$pkg" "$exe" >> "$log_file" 2>&1 &
+        # setsid 创建新进程组，stop 时可以连子进程一起杀
+        setsid ros2 run "$pkg" "$exe" >> "$log_file" 2>&1 &
         local pid=$!
         echo "$pid" > "$pid_file"
         echo "[START] $pkg/$exe  PID=$pid  日志: logs/$exe.log"
@@ -100,13 +107,28 @@ cmd_stop() {
 
         local pid
         pid=$(cat "$pid_file")
-        if kill -0 "$pid" 2>/dev/null; then
+
+        # 先尝试杀掉整个进程组（setsid 创建的 session leader）
+        if kill -- -"$pid" 2>/dev/null; then
+            echo "[STOP] $exe  进程组 PGID=$pid"
+            stopped=$((stopped + 1))
+        elif kill -0 "$pid" 2>/dev/null; then
+            # 回退：直接杀该 PID
             kill "$pid"
             echo "[STOP] $exe  PID=$pid"
             stopped=$((stopped + 1))
         else
             echo "[SKIP] $exe PID=$pid 已不存在"
         fi
+
+        # 额外清理：按可执行文件名再杀一遍，确保 ros2 run 的子进程不留孤儿
+        local actual_exe
+        actual_exe=$(basename "$exe")
+        if pgrep -x "$actual_exe" > /dev/null 2>&1; then
+            pkill -9 -x "$actual_exe"
+            echo "[CLEAN] $actual_exe 残留进程已清理"
+        fi
+
         rm -f "$pid_file"
     done < <(_read_conf)
 
