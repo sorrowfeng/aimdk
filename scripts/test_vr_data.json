@@ -1,0 +1,16 @@
+{
+  "hands": [
+    {
+      "hand": "left",
+      "relative_position": { "x": 0.0, "y": 0.0, "z": 0.0 },
+      "orientation": { "pitch": 0.0, "yaw": 0.0, "roll": 0.0 },
+      "finger_joints": [1.400, 0.700, 0.700, 0.700, 0.700, 0.700]
+    },
+    {
+      "hand": "right",
+      "relative_position": { "x": 0.0, "y": 0.0, "z": 0.0 },
+      "orientation": { "pitch": 0.0, "yaw": 0.0, "roll": 0.0 },
+      "finger_joints": [1.400, 0.000, 0.000, 0.000, 0.000, 0.000]
+    }
+  ]
+}
