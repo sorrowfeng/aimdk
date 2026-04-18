@@ -143,7 +143,9 @@ class SimpleArmIK {
   }
 
   Eigen::VectorXd SolvePosition(const Eigen::Vector3d& target_pos,
-                                const Eigen::VectorXd& q_init) const {
+                                const Eigen::VectorXd& q_init,
+                                const std::vector<JointInfo>& joint_limits,
+                                int joint_offset) const {
     Eigen::VectorXd q = q_init;
     for (int iter = 0; iter < max_iterations; ++iter) {
       Eigen::Vector3d err = target_pos - ForwardPosition(q);
@@ -156,8 +158,8 @@ class SimpleArmIK {
 
       for (int i = 0; i < 4; ++i) {
         q(i) += Clamp(dq(i), -0.05, 0.05);
-        q(i) = Clamp(q(i), kArmJoints[i].lower_limit,
-                     kArmJoints[i].upper_limit);
+        q(i) = Clamp(q(i), joint_limits[joint_offset + i].lower_limit,
+                     joint_limits[joint_offset + i].upper_limit);
       }
     }
     return q;
@@ -257,10 +259,13 @@ class VRTeleopNode : public rclcpp::Node {
     declare_parameter<std::string>("arm_command_topic",
                                    "/aima/hal/joint/arm/command");
     declare_parameter<std::string>("vr_data_topic", "/udp_vr_bridge/arm_target");
-    declare_parameter<double>("control_frequency", 100.0);
+    declare_parameter<double>("control_frequency", 200.0);
     declare_parameter<bool>("demo_mode", false);
     declare_parameter<double>("vr_timeout_sec", 0.5);
     declare_parameter<double>("position_scale", 1.0);  // VR数据已是相对量，scale默认1.0
+    declare_parameter<double>("ruckig_max_velocity", 2.0);
+    declare_parameter<double>("ruckig_max_acceleration", 4.0);
+    declare_parameter<double>("ruckig_max_jerk", 20.0);
 
     // Ready Pose 参数：上臂自然下垂，肘关节弯曲约 90°，使前臂保持水平平直
     // [shoulder_pitch, shoulder_roll, shoulder_yaw, elbow, wrist_yaw, wrist_pitch, wrist_roll]
@@ -334,10 +339,15 @@ class VRTeleopNode : public rclcpp::Node {
   }
 
   void InitRuckig() {
+    const double max_velocity = get_parameter("ruckig_max_velocity").as_double();
+    const double max_acceleration =
+        get_parameter("ruckig_max_acceleration").as_double();
+    const double max_jerk = get_parameter("ruckig_max_jerk").as_double();
+
     for (int i = 0; i < kArmDofs; ++i) {
-      ruckig_input_.max_velocity[i] = 1.0;
-      ruckig_input_.max_acceleration[i] = 2.0;
-      ruckig_input_.max_jerk[i] = 10.0;
+      ruckig_input_.max_velocity[i] = max_velocity;
+      ruckig_input_.max_acceleration[i] = max_acceleration;
+      ruckig_input_.max_jerk[i] = max_jerk;
     }
   }
 
@@ -461,10 +471,10 @@ class VRTeleopNode : public rclcpp::Node {
       }
       Eigen::VectorXd q_left =
           left_ik_.SolvePosition(left_wrist_ready_pos_ + left_delta,
-                                 ready_pose_left_);
+                                 current_q_.segment(0, 7), kArmJoints, 0);
       Eigen::VectorXd q_right =
           right_ik_.SolvePosition(right_wrist_ready_pos_ + right_delta,
-                                  ready_pose_right_);
+                                  current_q_.segment(7, 7), kArmJoints, 7);
       targets.segment(0, 7) = q_left;
       targets.segment(7, 7) = q_right;
       return targets;
@@ -499,7 +509,8 @@ class VRTeleopNode : public rclcpp::Node {
       Eigen::Vector3d left_target = left_wrist_ready_pos_ + vr_delta;
 
       Eigen::VectorXd q_left =
-          left_ik_.SolvePosition(left_target, ready_pose_left_);
+          left_ik_.SolvePosition(left_target, current_q_.segment(0, 7),
+                                 kArmJoints, 0);
 
       // 姿态映射
       double roll = 0.0, pitch = 0.0, yaw = 0.0;
@@ -522,7 +533,8 @@ class VRTeleopNode : public rclcpp::Node {
       Eigen::Vector3d right_target = right_wrist_ready_pos_ + vr_delta;
 
       Eigen::VectorXd q_right =
-          right_ik_.SolvePosition(right_target, ready_pose_right_);
+          right_ik_.SolvePosition(right_target, current_q_.segment(7, 7),
+                                  kArmJoints, 7);
 
       double roll = 0.0, pitch = 0.0, yaw = 0.0;
       QuaternionToZYX(ctrl.orientation, roll, pitch, yaw);

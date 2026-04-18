@@ -59,8 +59,8 @@ class UDPVRBridgeNode(Node):
         self.declare_parameter("udp_port", 9999)
         self.declare_parameter("vr_data_topic", "/udp_vr_bridge/arm_target")
         self.declare_parameter("hand_command_topic", "/aima/hal/joint/hand/command")
-        self.declare_parameter("publish_rate", 50.0)
-        self.declare_parameter("hand_smoothing_alpha", 0.2)
+        self.declare_parameter("publish_rate", 100.0)
+        self.declare_parameter("hand_command_velocity", 1.0)
         # 坐标重映射：解决 VR 手柄坐标系与机器人手臂坐标系不一致的问题
         # 默认值基于当前设备观察：手柄左右(x)->手臂前后，手柄上下(y)->手臂左右
         self.declare_parameter("coord_map_x", "-z")
@@ -71,7 +71,7 @@ class UDPVRBridgeNode(Node):
         vr_topic = self.get_parameter("vr_data_topic").value
         hand_topic = self.get_parameter("hand_command_topic").value
         publish_rate = self.get_parameter("publish_rate").value
-        self.hand_smoothing_alpha = self.get_parameter("hand_smoothing_alpha").value
+        self.hand_command_velocity = self.get_parameter("hand_command_velocity").value
         self.coord_map = {
             "x": self.get_parameter("coord_map_x").value,
             "y": self.get_parameter("coord_map_y").value,
@@ -86,10 +86,9 @@ class UDPVRBridgeNode(Node):
         self.udp_sock.settimeout(0.05)
 
         self.latest_data = None
+        self.latest_data_seq = 0
+        self.last_logged_seq = -1
         self.data_lock = threading.Lock()
-
-        self.smoothed_hand = {"left": None, "right": None}
-        self.debug_log_counter = 0
 
         self.stop_udp = False
         self.udp_thread = threading.Thread(target=self._udp_loop, daemon=True)
@@ -110,6 +109,7 @@ class UDPVRBridgeNode(Node):
                 json_data = json.loads(data.decode("utf-8"))
                 with self.data_lock:
                     self.latest_data = json_data
+                    self.latest_data_seq += 1
             except socket.timeout:
                 continue
             except json.JSONDecodeError as e:
@@ -120,6 +120,7 @@ class UDPVRBridgeNode(Node):
     def _publish_loop(self):
         with self.data_lock:
             data = self.latest_data
+            data_seq = self.latest_data_seq
 
         if data is None:
             return
@@ -131,25 +132,38 @@ class UDPVRBridgeNode(Node):
         vr_msg.header = Header()
         vr_msg.header.stamp = now
 
-        left_data = {}
-        right_data = {}
-        for hand in data.get("hands", []):
-            side = hand.get("hand", "").lower()
-            if side == "left":
-                left_data = hand
-            elif side == "right":
-                right_data = hand
+        hands = data.get("hands", [])
+        if not isinstance(hands, list) or len(hands) < 2:
+            self.get_logger().warn(
+                f"UDP JSON hands format invalid, expected 2 items: {data}"
+            )
+            return
 
-        if left_data:
-            vr_msg.vr_controller_states.append(self._build_controller_state(left_data))
-        if right_data:
-            vr_msg.vr_controller_states.append(self._build_controller_state(right_data))
+        left_data = hands[0] if isinstance(hands[0], dict) else {}
+        right_data = hands[1] if isinstance(hands[1], dict) else {}
+
+        if left_data.get("hand", "").lower() not in ("", "left"):
+            self.get_logger().warn(
+                f"hands[0].hand should be left, got: {left_data.get('hand')}"
+            )
+        if right_data.get("hand", "").lower() not in ("", "right"):
+            self.get_logger().warn(
+                f"hands[1].hand should be right, got: {right_data.get('hand')}"
+            )
+
+        vr_msg.vr_controller_states.append(
+            self._build_controller_state(left_data, "left")
+        )
+        vr_msg.vr_controller_states.append(
+            self._build_controller_state(right_data, "right")
+        )
 
         self.vr_pub.publish(vr_msg)
 
         # 调试日志：每秒打印一次原始坐标 vs 映射后坐标
-        if left_data or right_data:
+        if data_seq != self.last_logged_seq and (left_data or right_data):
             self._log_coord_debug(left_data, right_data)
+            self.last_logged_seq = data_seq
 
         # --- HandCommandArray ---
         hand_msg = HandCommandArray()
@@ -161,21 +175,13 @@ class UDPVRBridgeNode(Node):
         hand_msg.right_hand_type.value = 3
 
         if left_data:
-            hand_msg.left_hands = self._smooth_hand_commands(
-                "left", self._build_hand_commands(left_data)
-            )
+            hand_msg.left_hands = self._build_hand_commands(left_data)
         if right_data:
-            hand_msg.right_hands = self._smooth_hand_commands(
-                "right", self._build_hand_commands(right_data)
-            )
+            hand_msg.right_hands = self._build_hand_commands(right_data)
 
         self.hand_pub.publish(hand_msg)
 
     def _log_coord_debug(self, left_data: dict, right_data: dict):
-        self.debug_log_counter += 1
-        if self.debug_log_counter % 50 != 0:  # 50Hz 下每秒打印一次
-            return
-
         def fmt_raw(d: dict) -> str:
             p = d.get("relative_position", {})
             return f"({p.get('x',0):.3f},{p.get('y',0):.3f},{p.get('z',0):.3f})"
@@ -183,18 +189,44 @@ class UDPVRBridgeNode(Node):
         def fmt_mapped(v: Vector3) -> str:
             return f"({v.x:.3f},{v.y:.3f},{v.z:.3f})"
 
-        log_parts = []
-        if left_data:
-            raw = fmt_raw(left_data)
-            mapped = fmt_mapped(self._apply_coord_map(left_data.get("relative_position", {})))
-            log_parts.append(f"LEFT raw={raw} mapped={mapped}")
-        if right_data:
-            raw = fmt_raw(right_data)
-            mapped = fmt_mapped(self._apply_coord_map(right_data.get("relative_position", {})))
-            log_parts.append(f"RIGHT raw={raw} mapped={mapped}")
+        def fmt_orientation(d: dict) -> str:
+            o = d.get("orientation", {})
+            return (
+                f"(pitch={float(o.get('pitch', 0.0)):.3f}, "
+                f"yaw={float(o.get('yaw', 0.0)):.3f}, "
+                f"roll={float(o.get('roll', 0.0)):.3f})"
+            )
+
+        def fmt_finger_joints(d: dict) -> str:
+            finger_joints = d.get("finger_joints", [])
+            if not isinstance(finger_joints, list):
+                return "INVALID"
+            return "[" + ", ".join(f"{float(v):.3f}" for v in finger_joints) + "]"
+
+        def fmt_hand(side: str, d: dict) -> str:
+            if not d:
+                return f"{side}: missing"
+
+            raw = fmt_raw(d)
+            mapped = fmt_mapped(self._apply_coord_map(d.get("relative_position", {})))
+            orientation = fmt_orientation(d)
+            finger_joints = fmt_finger_joints(d)
+            hand_name = d.get("hand", "")
+            return (
+                f"{side}: hand={hand_name or 'N/A'}"
+                f" raw_pos={raw}"
+                f" mapped_pos={mapped}"
+                f" orientation={orientation}"
+                f" finger_joints={finger_joints}"
+            )
+
+        log_parts = [
+            fmt_hand("LEFT", left_data),
+            fmt_hand("RIGHT", right_data),
+        ]
 
         if log_parts:
-            self.get_logger().info(" | ".join(log_parts))
+            self.get_logger().info("UDP RX | " + " || ".join(log_parts))
 
     def _apply_coord_map(self, pos: dict) -> Vector3:
         """根据参数 coord_map_x/y/z 重映射 VR 坐标到机器人坐标"""
@@ -217,8 +249,9 @@ class UDPVRBridgeNode(Node):
 
         return Vector3(x=mapped["x"], y=mapped["y"], z=mapped["z"])
 
-    def _build_controller_state(self, d: dict) -> VRControllerState:
+    def _build_controller_state(self, d: dict, side: str) -> VRControllerState:
         ctrl = VRControllerState()
+        ctrl.name = side
         ctrl.position = self._apply_coord_map(d.get("relative_position", {}))
         # 暂不处理姿态，固定为单位四元数
         ctrl.orientation = Quaternion(x=0.0, y=0.0, z=0.0, w=1.0)
@@ -257,30 +290,11 @@ class UDPVRBridgeNode(Node):
             cmd = HandCommand()
             cmd.name = ""
             cmd.position = float(pos)
-            cmd.velocity = 0.3
+            cmd.velocity = float(self.hand_command_velocity)
             cmd.acceleration = 0.0
             cmd.deceleration = 0.0
             cmd.effort = 0.0
             cmds.append(cmd)
-        return cmds
-
-    def _smooth_hand_commands(self, side: str, cmds: list) -> list:
-        if not cmds:
-            self.smoothed_hand[side] = None
-            return []
-
-        target = [cmd.position for cmd in cmds]
-        smoothed = self.smoothed_hand[side]
-
-        if smoothed is None:
-            self.smoothed_hand[side] = target[:]
-            return cmds
-
-        alpha = self.hand_smoothing_alpha
-        for i in range(6):
-            smoothed[i] = alpha * target[i] + (1.0 - alpha) * smoothed[i]
-            cmds[i].position = smoothed[i]
-
         return cmds
 
     def destroy_node(self):
