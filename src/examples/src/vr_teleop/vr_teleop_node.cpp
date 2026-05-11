@@ -456,6 +456,7 @@ class VRTeleopNode : public rclcpp::Node {
   Eigen::VectorXd MapVRToArmTargets() {
     Eigen::VectorXd targets(kArmDofs);
     targets.setZero();
+    constexpr double kReadyPoseZeroThreshold = 0.005;
 
     if (returning_home_) {
       targets = initial_q_;
@@ -506,6 +507,11 @@ class VRTeleopNode : public rclcpp::Node {
       Eigen::Vector3d vr_delta(ctrl.position.x * position_scale_,
                                ctrl.position.y * position_scale_,
                                ctrl.position.z * position_scale_);
+      if (vr_delta.norm() < kReadyPoseZeroThreshold) {
+        RCLCPP_INFO_THROTTLE(
+            get_logger(), *get_clock(), 1000,
+            "LEFT relative_position near zero, returning to Ready Pose");
+      }
       Eigen::Vector3d left_target = left_wrist_ready_pos_ + vr_delta;
 
       Eigen::VectorXd q_left =
@@ -530,6 +536,11 @@ class VRTeleopNode : public rclcpp::Node {
       Eigen::Vector3d vr_delta(ctrl.position.x * position_scale_,
                                ctrl.position.y * position_scale_,
                                ctrl.position.z * position_scale_);
+      if (vr_delta.norm() < kReadyPoseZeroThreshold) {
+        RCLCPP_INFO_THROTTLE(
+            get_logger(), *get_clock(), 1000,
+            "RIGHT relative_position near zero, returning to Ready Pose");
+      }
       Eigen::Vector3d right_target = right_wrist_ready_pos_ + vr_delta;
 
       Eigen::VectorXd q_right =

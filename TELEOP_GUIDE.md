@@ -6,7 +6,38 @@
 
 ## 一、前置条件
 
-### 1.1 必须进入 `Develop_MC` 模式
+### 1.1 摇操启动流程
+
+终端1: 进入开发者模式, 并且开启手臂控制程序
+
+```bash
+# 进入工作目录
+cd aimdk
+
+# 应用环境变量
+source install/setup.bash
+
+# 进入开发模式
+ros2 run py_examples migrate_system_state Develop_MC
+
+# 启动手臂控制程序
+ros2 run examples vr_teleop_node
+```
+
+终端2: 启动VR桥接程序
+
+```bash
+# 进入工作目录
+cd aimdk
+
+# 应用环境变量
+source install/setup.bash
+
+# 启动VR桥接程序
+ros2 run py_examples udp_vr_bridge
+```
+
+### 1.2 必须进入 `Develop_MC` 模式
 
 在进行任何手臂或灵巧手遥操前，机器人必须处于 `Develop_MC` 模式，否则 MC/HAL 层会冲突，导致控制命令被覆盖。
 
@@ -25,7 +56,7 @@ State="Develop_MC"
 Migration to Develop_MC completed successfully!
 ```
 
-### 1.2 编译
+### 1.3 编译
 
 ```bash
 cd ~/aimdk
