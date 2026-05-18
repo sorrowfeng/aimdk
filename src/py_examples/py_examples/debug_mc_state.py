@@ -10,6 +10,7 @@ debug_mc_state.py
 """
 
 import argparse
+import json
 import sys
 from datetime import datetime
 
@@ -18,15 +19,55 @@ from aimdk_msgs.msg import McCommonState
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 
+def _msg_to_dict(msg, depth=0):
+    """将 ROS 消息转换为可读的字典格式"""
+    if depth > 5:
+        return str(msg)
+
+    result = {}
+    try:
+        # 获取消息的所有字段
+        slots = msg.get_fields_and_field_types()
+        for field_name in slots:
+            try:
+                value = getattr(msg, field_name)
+                # 如果是嵌套消息，递归处理
+                if hasattr(value, 'get_fields_and_field_types'):
+                    result[field_name] = _msg_to_dict(value, depth + 1)
+                else:
+                    result[field_name] = value
+            except Exception:
+                result[field_name] = str(getattr(msg, field_name, ''))
+    except Exception:
+        return str(msg)
+    return result
+
+
+def _format_dict(d, indent=2):
+    """格式化字典为易读的字符串"""
+    lines = []
+    for key, value in d.items():
+        if isinstance(value, dict):
+            lines.append(f"{' ' * indent}{key}:")
+            lines.append(_format_dict(value, indent + 2))
+        else:
+            lines.append(f"{' ' * indent}{key}: {value}")
+    return '\n'.join(lines)
+
+
 # 动作 ID 到名称的映射（便于阅读）
 MOTION_NAMES = {
     "1001": "举手",
     "1002": "挥手",
     "1003": "握手",
     "1004": "飞吻",
+    "1005": "点赞",
+    "1006": "比耶",
     "1007": "比心",
     "1008": "击掌",
+    "1009": "平举",
     "1010": "平举",
+    "1012": "转身",
     "1011": "胸前挥手",
     "1013": "敬礼",
     "3001": "鞠躬",
@@ -120,10 +161,10 @@ class DebugMcState(Node):
             print(f"动作 ID:     {motion_id:<10} ({motion_name})")
             print(f"播放状态:    {player_state:<10} ({state_name})")
             print(f"控制区域:    {area:<10} ({area_name})")
-
-            # 如果有其他有用字段，可以在这里添加
-            # 例如：print(f"其他字段: {msg.motion_status.xxx}")
-
+            print(f"{'─'*60}")
+            print(f"原始消息:")
+            msg_dict = _msg_to_dict(msg)
+            print(_format_dict(msg_dict))
             print(f"{'='*60}")
 
             # 如果是新动作开始，特别提示
@@ -193,9 +234,17 @@ def main(args=None):
         rclpy.spin(node)
     except KeyboardInterrupt:
         print(f"\n\n共接收 {node._msg_count} 条消息")
+    except Exception:
+        pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        try:
+            node.destroy_node()
+        except Exception:
+            pass
+        try:
+            rclpy.shutdown()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
