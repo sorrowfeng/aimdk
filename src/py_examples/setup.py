@@ -57,6 +57,7 @@ setup(
             "voice_command_ip = py_examples.voice_command_ip:main",
             "ai_voice_chat = py_examples.ai_voice_chat:main",
             "udp_vr_bridge = py_examples.udp_vr_bridge:main",
+            "debug_mc_state = py_examples.debug_mc_state:main",
         ],
     },
 )

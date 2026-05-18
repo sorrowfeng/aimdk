@@ -68,7 +68,7 @@ source install/setup.bash
 
 ### 机器人 SSH 信息
 
-- **IP**: `172.16.20.110`
+- **IP**: `172.16.20.104`
 - **用户名**: `agi`
 - **密码**: `1`
 - **代码路径**: `/home/agi/aimdk`
@@ -86,13 +86,13 @@ chmod +x /tmp/askpass.sh
 DISPLAY=dummy:0 SSH_ASKPASS=/tmp/askpass.sh scp \
   -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   src/py_examples/py_examples/udp_vr_bridge.py \
-  agi@172.16.20.110:/home/agi/aimdk/src/py_examples/py_examples/udp_vr_bridge.py \
+  agi@172.16.20.104:/home/agi/aimdk/src/py_examples/py_examples/udp_vr_bridge.py \
   </dev/null
 
 # 远程编译
 DISPLAY=dummy:0 SSH_ASKPASS=/tmp/askpass.sh ssh \
   -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  agi@172.16.20.110 \
+  agi@172.16.20.104 \
   "cd /home/agi/aimdk && source /opt/ros/humble/setup.bash && colcon build --packages-select py_examples" \
   </dev/null
 ```
