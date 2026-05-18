@@ -67,7 +67,7 @@ PRESETS = {
     # 点赞：拇指竖起，四指握拳
     "thumbs_up": [0.0, 0.0, 1.40, 1.40, 1.40, 1.40],
     # 比耶：食指中指伸直呈 V 字，其他握拳
-    "peace_sign": [0.70, 0.70, 0.0, 0.0, 1.40, 1.40],
+    "peace_sign": [1.40, 1.00, 0.0, 0.0, 1.40, 1.40],
 }
 
 # ─────────────────────────────────────────────────────────
@@ -146,7 +146,6 @@ class RcHandSync(Node):
         self.get_logger().info("rc_hand_sync 已启动")
 
     def _on_state(self, msg):
-        print("callback fired")  # 最原始验证，确认回调是否触发
         motion_id = msg.motion_status.motion  # 字符串，如 "1002"
         player_state = msg.motion_status.player_state.value  # 0=IDLE 2=PLAYING
         area = msg.motion_status.control_area.value  # 1/2/3/11
