@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(aimdk_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(ruckig REQUIRED)
@@ -175,13 +176,8 @@ endforeach()
 # ---------------- VR Teleop 可执行程序 ----------------
 add_executable(vr_teleop_node src/vr_teleop/vr_teleop_node.cpp)
 target_link_libraries(vr_teleop_node ruckig::ruckig Eigen3::Eigen)
-ament_target_dependencies(vr_teleop_node rclcpp aimdk_msgs sensor_msgs)
+ament_target_dependencies(vr_teleop_node rclcpp aimdk_msgs sensor_msgs geometry_msgs)
 install(TARGETS vr_teleop_node DESTINATION lib/${PROJECT_NAME})
-
-add_executable(hand_teleop_node src/vr_teleop/hand_teleop_node.cpp)
-target_link_libraries(hand_teleop_node ruckig::ruckig)
-ament_target_dependencies(hand_teleop_node rclcpp aimdk_msgs)
-install(TARGETS hand_teleop_node DESTINATION lib/${PROJECT_NAME})
 
 # ---------------- 数据 ----------------
 install(DIRECTORY data/ DESTINATION lib/${PROJECT_NAME}/data)

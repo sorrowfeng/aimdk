@@ -14,8 +14,7 @@ aimdk/
 │   ├── aimdk_msgs/          # ROS 2 消息/服务定义（156+ 接口文件）
 │   ├── examples/             # C++ 示例和遥操节点
 │   │   ├── src/vr_teleop/
-│   │   │   ├── vr_teleop_node.cpp    # 主手臂 IK + Ruckig 平滑节点
-│   │   │   ├── hand_teleop_node.cpp  # 灵巧手遥操节点
+│   │   │   ├── vr_teleop_node.cpp    # UDP JSON v3 + 手臂 IK + 灵巧手命令节点
 │   │   │   └── parse_x2_urdf.py      # URDF 运动学参数提取脚本
 │   │   ├── src/hal/                  # HAL 示例（摄像头、传感器等）
 │   │   ├── src/mc/                   # 运动控制示例
@@ -23,7 +22,6 @@ aimdk/
 │   │   └── CMakeLists.txt
 │   └── py_examples/          # Python 示例和工具节点
 │       ├── py_examples/
-│       │   ├── udp_vr_bridge.py      # UDP JSON -> VRData + HandCommandArray
 │       │   ├── ai_voice_chat.py      # 百度 ASR + Claude AI 问答
 │       │   ├── voice_command_ip.py   # 语音指令查询 IP
 │       │   ├── migrate_system_state.py
@@ -52,10 +50,10 @@ aimdk/
 cd /home/agi/aimdk
 source /opt/ros/humble/setup.bash
 
-# 构建 C++ examples（vr_teleop_node、hand_teleop_node）
+# 构建 C++ examples（vr_teleop_node）
 colcon build --packages-select examples --cmake-args -DCMAKE_BUILD_TYPE=Release
 
-# 构建 Python py_examples（udp_vr_bridge、ai_voice_chat）
+# 构建 Python py_examples（语音和工具节点）
 colcon build --packages-select py_examples
 
 # 同时构建两个包
@@ -75,7 +73,7 @@ source install/setup.bash
 
 ### 快速部署脚本（Windows/Git Bash）
 
-在本地修改 `src/py_examples/py_examples/udp_vr_bridge.py` 后，可自动复制到机器人并编译：
+在本地修改 `src/examples/src/vr_teleop/vr_teleop_node.cpp` 后，可自动复制到机器人并编译：
 
 ```bash
 # 创建 askpass 脚本（只需执行一次）
@@ -85,15 +83,15 @@ chmod +x /tmp/askpass.sh
 # 复制文件
 DISPLAY=dummy:0 SSH_ASKPASS=/tmp/askpass.sh scp \
   -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-  src/py_examples/py_examples/udp_vr_bridge.py \
-  agi@172.16.20.104:/home/agi/aimdk/src/py_examples/py_examples/udp_vr_bridge.py \
+  src/examples/src/vr_teleop/vr_teleop_node.cpp \
+  agi@172.16.20.104:/home/agi/aimdk/src/examples/src/vr_teleop/vr_teleop_node.cpp \
   </dev/null
 
 # 远程编译
 DISPLAY=dummy:0 SSH_ASKPASS=/tmp/askpass.sh ssh \
   -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
   agi@172.16.20.104 \
-  "cd /home/agi/aimdk && source /opt/ros/humble/setup.bash && colcon build --packages-select py_examples" \
+  "cd /home/agi/aimdk && source /opt/ros/humble/setup.bash && colcon build --packages-select examples --cmake-args -DCMAKE_BUILD_TYPE=Release" \
   </dev/null
 ```
 
@@ -116,16 +114,13 @@ ros2 run py_examples migrate_system_state Ready
 ### 1. UDP VR 遥操链路（推荐）
 
 ```bash
-# 终端 1：手臂 IK + Ruckig 平滑
+# UDP JSON v3 接收 + 手臂 IK + 灵巧手命令（默认监听 9999）
 ros2 run examples vr_teleop_node
-
-# 终端 2：UDP JSON 桥接（默认端口 9999）
-ros2 run py_examples udp_vr_bridge
 ```
 
-- `udp_vr_bridge` 接收 JSON，发布到 `/udp_vr_bridge/arm_target`（`VRData`）和 `/aima/hal/joint/hand/command`（`HandCommandArray`）
-- `vr_teleop_node` 订阅 `VRData`，解算 IK 后发布平滑的 14-DOF 手臂命令到 `/aima/hal/joint/arm/command`
-- **不需要**运行 `hand_teleop_node`
+- `vr_teleop_node` 直接接收 PICO UDP JSON v3，不再通过 `VRData` 中间 topic
+- 控制器位姿来自 `controllers.left/right.pose`
+- 灵巧手命令来自 `robot_control.hands.left/right`，由同一节点发布到 `/aima/hal/joint/hand/command`
 
 JSON 格式详见 `TELEOP_GUIDE.md`。
 
@@ -154,9 +149,8 @@ ros2 run examples vr_teleop_node --ros-args -p demo_mode:=true
 
 | Topic | 类型 | 说明 |
 |-------|------|------|
-| `/udp_vr_bridge/arm_target` | `aimdk_msgs/VRData` | 手臂目标位姿（由 udp_vr_bridge 发布） |
 | `/aima/hal/joint/arm/command` | `aimdk_msgs/JointCommandArray` | 14-DOF 手臂命令（vr_teleop_node） |
-| `/aima/hal/joint/hand/command` | `aimdk_msgs/HandCommandArray` | 灵巧手 6 关节命令 |
+| `/aima/hal/joint/hand/command` | `aimdk_msgs/HandCommandArray` | 灵巧手 6 关节命令（vr_teleop_node） |
 | `/aima/hal/audio/capture` | `aimdk_msgs/AudioCapture` | 麦克风原始音频 |
 
 ## 架构模式
@@ -164,14 +158,13 @@ ros2 run examples vr_teleop_node --ros-args -p demo_mode:=true
 - **手臂控制**：DLS 数值 IK（位置）+ 欧拉角直接映射（姿态）+ `ruckig` 平滑
   - `vr_teleop_node.cpp:SimpleArmIK` 只解算前 4 个 DOF（shoulder_pitch/roll/yaw + elbow）
   - wrist_yaw/pitch/roll 直接从 `orientation` 四元数提取
-- **Ready Pose 策略**：启动后自动从当前状态平滑抬升到 elbow=-1.57 rad，后续所有 UDP `position` 都是相对此 Ready Pose 的偏移
+- **Ready Pose 策略**：启动后自动从当前状态平滑抬升到 elbow=-1.57 rad，后续所有 `controllers.*.pose.position` 都是相对此 Ready Pose 的偏移
 - **急停**：双手 `key_one && key_two` 同时为 true 时，`vr_teleop_node` 触发急停并停止控制循环
 - **灵巧手**：`HandType=3` 表示雷赛手，6 关节顺序固定（拇指 rot→bend，食指→中指→无名指→小指）
 
 ## 重要文件路径
 
 - 手臂 IK 节点：`src/examples/src/vr_teleop/vr_teleop_node.cpp`
-- UDP 桥接节点：`src/py_examples/py_examples/udp_vr_bridge.py`
 - AI 语音节点：`src/py_examples/py_examples/ai_voice_chat.py`
 - 使用说明：`TELEOP_GUIDE.md`
 
@@ -205,13 +198,12 @@ ros2 topic hz /aima/hal/joint/arm/command
 # 查看手部命令内容
 ros2 topic echo /aima/hal/joint/hand/command
 
-# 查看 VR 数据接收频率
-ros2 topic hz /udp_vr_bridge/arm_target
+# vr_teleop_node 日志会打印 UDP JSON v3 首包接收状态
 ```
 
 ## 给 Agent 的提示
 
 - 修改 C++ 节点后必须重新 `colcon build --packages-select examples`
-- 修改 Python 节点后必须重新 `colcon build --packages-select py_examples`（setup.py 变更才需要，`*.py` 源码修改通常无需重编译，但保险起见同步后都 build 一次）
+- 修改 Python 工具节点后必须重新 `colcon build --packages-select py_examples`（setup.py 变更才需要）
 - 任何手臂/手部的控制代码，都要检查是否涉及 `Develop_MC` 模式的前提
 - `aimdk_msgs` 的接口文件不要轻易修改，会影响整个工作空间

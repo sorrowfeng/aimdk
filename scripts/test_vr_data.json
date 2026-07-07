@@ -1,16 +1,44 @@
 {
-  "hands": [
-    {
-      "hand": "left",
-      "relative_position": { "x": 0.0, "y": 0.0, "z": 0.0 },
-      "orientation": { "pitch": 0.0, "yaw": 0.0, "roll": 0.0 },
-      "finger_joints": [1.400, 0.700, 0.700, 0.700, 0.700, 0.700]
+  "packet_version": 3,
+  "operator_mode": "active_stream",
+  "safety": {
+    "safe_to_execute": true
+  },
+  "controllers": {
+    "left": {
+      "quality": "live",
+      "pose": {
+        "position": { "x": 0.0, "y": 0.0, "z": 0.0 },
+        "orientation": { "pitch": 0.0, "yaw": 0.0, "roll": 0.0 }
+      },
+      "input": {
+        "thumbstick": { "x": 0.0, "y": 0.0 },
+        "trigger": 0.7,
+        "grip": 0.7,
+        "primary_pressed": false,
+        "secondary_pressed": false
+      }
     },
-    {
-      "hand": "right",
-      "relative_position": { "x": 0.0, "y": 0.0, "z": 0.0 },
-      "orientation": { "pitch": 0.0, "yaw": 0.0, "roll": 0.0 },
-      "finger_joints": [1.400, 0.000, 0.000, 0.000, 0.000, 0.000]
+    "right": {
+      "quality": "live",
+      "pose": {
+        "position": { "x": 0.0, "y": 0.0, "z": 0.0 },
+        "orientation": { "pitch": 0.0, "yaw": 0.0, "roll": 0.0 }
+      },
+      "input": {
+        "thumbstick": { "x": 0.0, "y": 0.0 },
+        "trigger": 0.0,
+        "grip": 0.0,
+        "primary_pressed": false,
+        "secondary_pressed": false
+      }
     }
-  ]
+  },
+  "robot_control": {
+    "hands": {
+      "unit": "raw",
+      "left": [8000, 7000, 7000, 7000, 7000, 7000],
+      "right": [8000, 0, 0, 0, 0, 0]
+    }
+  }
 }

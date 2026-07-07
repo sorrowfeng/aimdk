@@ -6,9 +6,9 @@
 
 ## 一、前置条件
 
-### 1.1 摇操启动流程
+### 1.1 遥操启动流程
 
-终端1: 进入开发者模式, 并且开启手臂控制程序
+进入开发者模式后启动 `vr_teleop_node`。该节点会直接监听 UDP JSON v3，同时发布手臂和灵巧手命令。
 
 ```bash
 # 进入工作目录
@@ -22,19 +22,6 @@ ros2 run py_examples migrate_system_state Develop_MC
 
 # 启动手臂控制程序
 ros2 run examples vr_teleop_node
-```
-
-终端2: 启动VR桥接程序
-
-```bash
-# 进入工作目录
-cd aimdk
-
-# 应用环境变量
-source install/setup.bash
-
-# 启动VR桥接程序
-ros2 run py_examples udp_vr_bridge
 ```
 
 ### 1.2 必须进入 `Develop_MC` 模式
@@ -62,10 +49,10 @@ Migration to Develop_MC completed successfully!
 cd ~/aimdk
 source /opt/ros/humble/setup.bash
 
-# C++ examples（vr_teleop_node、hand_teleop_node）
+# C++ examples（vr_teleop_node）
 colcon build --packages-select examples --cmake-args -DCMAKE_BUILD_TYPE=Release
 
-# Python py_examples（udp_vr_bridge、ai_voice_chat）
+# Python py_examples（语音、工具节点）
 colcon build --packages-select py_examples
 
 source install/setup.bash
@@ -77,9 +64,7 @@ source install/setup.bash
 
 | 节点 | 包 | 语言 | 功能 |
 |------|-----|------|------|
-| `vr_teleop_node` | `examples` | C++ | 手臂 IK + Ruckig 平滑，发布 `JointCommandArray` |
-| `udp_vr_bridge` | `py_examples` | Python | UDP 接收 JSON，发布 `VRData` + `HandCommandArray` |
-| `hand_teleop_node` | `examples` | C++ | 独立的 VR 手柄到灵巧手映射节点 |
+| `vr_teleop_node` | `examples` | C++ | UDP JSON v3 接收 + 手臂 IK + 手腕姿态映射 + 灵巧手命令 |
 | `ai_voice_chat` | `py_examples` | Python | 百度 ASR + AI 问答 + TTS 播报 |
 
 ---
@@ -89,38 +74,63 @@ source install/setup.bash
 ### 3.1 启动方式
 
 ```bash
-# 终端 1：手臂 IK + Ruckig 平滑
+# 默认监听 UDP 9999
 ros2 run examples vr_teleop_node
 
-# 终端 2：UDP JSON 桥接
-ros2 run py_examples udp_vr_bridge
-
 # 可自定义端口
-ros2 run py_examples udp_vr_bridge --ros-args -p udp_port:=12345
+ros2 run examples vr_teleop_node --ros-args -p udp_port:=12345
 ```
 
-> 使用 `udp_vr_bridge` 时，不需要再运行 `hand_teleop_node`，因为 UDP 桥接节点已经直接发布手部命令。
+不再需要运行 Python UDP bridge，也不再通过 `VRData` 中间 topic 转发。
 
 ### 3.2 UDP JSON 数据格式
 
-VR 设备向机器人本机 `9999` 端口（默认）发送 UDP JSON。当前正式协议使用 `hands[]` 数组，而不是旧版顶层 `left/right` 结构。
+VR 设备向机器人本机 `9999` 端口（默认）发送 PICO UDP JSON v3。机器人端只解析 `packet_version=3` 的包，并以同一包内的 `safety.safe_to_execute == true` 作为运动许可。
 
 ```json
 {
-  "hands": [
-    {
-      "hand": "left",
-      "relative_position": {"x": 0.0, "y": 0.0, "z": 0.0},
-      "orientation": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
-      "finger_joints": [1.4, 0.7, 0.7, 0.7, 0.7, 0.7]
+  "packet_version": 3,
+  "operator_mode": "active_stream",
+  "safety": {
+    "safe_to_execute": true
+  },
+  "controllers": {
+    "left": {
+      "quality": "live",
+      "pose": {
+        "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "orientation": {"pitch": 0.0, "yaw": 0.0, "roll": 0.0}
+      },
+      "input": {
+        "thumbstick": {"x": 0.0, "y": 0.0},
+        "trigger": 0.0,
+        "grip": 0.0,
+        "primary_pressed": false,
+        "secondary_pressed": false
+      }
     },
-    {
-      "hand": "right",
-      "relative_position": {"x": 0.0, "y": 0.0, "z": 0.0},
-      "orientation": {"roll": 0.0, "pitch": 0.0, "yaw": 0.0},
-      "finger_joints": [1.4, 0.0, 0.0, 0.0, 0.0, 0.0]
+    "right": {
+      "quality": "live",
+      "pose": {
+        "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+        "orientation": {"pitch": 0.0, "yaw": 0.0, "roll": 0.0}
+      },
+      "input": {
+        "thumbstick": {"x": 0.0, "y": 0.0},
+        "trigger": 0.0,
+        "grip": 0.0,
+        "primary_pressed": false,
+        "secondary_pressed": false
+      }
     }
-  ]
+  },
+  "robot_control": {
+    "hands": {
+      "unit": "raw",
+      "left": [8000, 0, 0, 0, 0, 0],
+      "right": [8000, 0, 0, 0, 0, 0]
+    }
+  }
 }
 ```
 
@@ -128,41 +138,42 @@ VR 设备向机器人本机 `9999` 端口（默认）发送 UDP JSON。当前正
 
 | 字段 | 类型 | 含义 |
 |------|------|------|
-| `hands[].hand` | string | 手标识，取值为 `left` 或 `right` |
-| `hands[].relative_position.x/y/z` | float | 相对 **Ready Pose** 的末端空间偏移，用于手臂 IK |
-| `hands[].orientation.roll/pitch/yaw` | float | 保留的姿态字段 |
-| `hands[].finger_joints[0~5]` | float[6] | 灵巧手 6 关节目标角度，直接下发 |
+| `packet_version` | number | 必须为 `3` |
+| `operator_mode` | string | `stop_signal` 时停止消费位姿；其它状态仍以 `safe_to_execute` 为准 |
+| `safety.safe_to_execute` | bool | 唯一运动执行许可 |
+| `controllers.left/right.quality` | string | 只有 `live` 或空值时消费该侧 pose |
+| `controllers.left/right.pose.position.x/y/z` | number | 控制器相对位移，叠加到 Ready Pose 腕部控制点 |
+| `controllers.left/right.pose.orientation.pitch/yaw/roll` | number | 控制器欧拉角，单位 deg；机器人侧 `roll -> wrist_yaw`、`pitch -> wrist_pitch`、`yaw -> wrist_roll` |
+| `controllers.left/right.input.primary_pressed/secondary_pressed` | bool | 双手两个按键同时按下触发急停 |
+| `robot_control.hands.left/right` | number[6] | 灵巧手 raw 命令，范围 `0..10000` |
 
-#### 当前关于姿态字段的说明
+#### 姿态与安全
 
-- `orientation` 目前是保留字段，协议层仍然接收。
-- 当前版本的 `udp_vr_bridge` 暂时将姿态固定为单位四元数发布。
-- 这意味着手腕 `wrist_yaw / wrist_pitch / wrist_roll` 目前不会跟随 UDP 的 `orientation` 输入。
+- `pose.position` 已按发送端校准输出，接收端不再做首帧归零。
+- `pose.orientation` 按 UDP JSON v3 协议解析；接收端只做 `deg -> rad`，再交换 `yaw/roll` 输出到 `wrist_yaw / wrist_pitch / wrist_roll`。
+- `safety.safe_to_execute=false`、`operator_mode="stop_signal"`、JSON 解析失败或 UDP 超时都会让手臂回到 Ready Pose 或保持安全姿态。
 
 #### 左右手索引约定
 
-`VRData.msg` 约定：
-
-- `vr_controller_states[0]` 固定表示左手
-- `vr_controller_states[1]` 固定表示右手
-
-当前 `udp_vr_bridge` 已按这个顺序稳定发布。即使某一只手当前没有有效数据，也会保留其索引位置，避免左右手错位。
+接收端固定从 `controllers.left` 映射左臂，从 `controllers.right` 映射右臂；不再依赖数组索引或 `VRData.msg`。
 
 #### 灵巧手关节顺序
 
-- `finger_joints[0]`：拇指旋转 / 侧摆
-- `finger_joints[1]`：拇指弯曲
-- `finger_joints[2]`：食指弯曲
-- `finger_joints[3]`：中指弯曲
-- `finger_joints[4]`：无名指弯曲
-- `finger_joints[5]`：小指弯曲
+`robot_control.hands.left/right` 是 `0..10000` raw 值，接收端会按雷赛手最大关节量换算为 HAL 位置命令：
+
+- `hands[0]`：拇指旋转 / 侧摆，最大 `1.75`
+- `hands[1]`：拇指弯曲，最大 `1.40`
+- `hands[2]`：食指弯曲，最大 `1.40`
+- `hands[3]`：中指弯曲，最大 `1.40`
+- `hands[4]`：无名指弯曲，最大 `1.40`
+- `hands[5]`：小指弯曲，最大 `1.40`
 
 ### 3.3 VR 坐标系映射到机器人手臂坐标系
 
-`udp_vr_bridge` 默认通过 `coord_map_x/y/z` 参数，把 VR 手柄坐标映射到机器人坐标。当前 AgiBot X2 实测默认值如下：
+`vr_teleop_node` 默认通过 `coord_map_x/y/z` 参数，把控制器坐标映射到机器人手臂坐标。当前 AgiBot X2 实测默认值如下：
 
 ```bash
-ros2 run py_examples udp_vr_bridge \
+ros2 run examples vr_teleop_node \
   --ros-args \
   -p coord_map_x:="-z" \
   -p coord_map_y:="-x" \
@@ -187,19 +198,21 @@ ros2 run py_examples udp_vr_bridge \
 2. 自动进入 `Ready Pose`
    - 默认 `ready_pose_left/right = [0.0, 0.0, 0.0, -1.57, 0.0, 0.0, 0.0]`
    - 表示肘关节弯曲约 90 度
-3. 将 UDP 的 `relative_position` 偏移叠加到 `Ready Pose` 末端位置
-4. 对前 4 个关节做位置 IK
+3. 将 `controllers.left/right.pose.position` 偏移叠加到 `Ready Pose` 腕部控制点
+4. 对前 4 个关节做阻尼最小二乘位置 IK
    - `shoulder_pitch`
    - `shoulder_roll`
    - `shoulder_yaw`
    - `elbow`
-5. 用 `ruckig::Ruckig<14>` 在 100Hz 下做轨迹平滑
-6. 发布到 `/aima/hal/joint/arm/command`
+5. 手腕 3 个关节直接消费控制器欧拉角，并按关节限位裁剪
+6. 用 `ruckig::Ruckig<14>` 在 100Hz 下做轨迹平滑
+7. 发布到 `/aima/hal/joint/arm/command`
 
 说明：
 
 - 左右臂 IK 现在分别使用各自的关节限位。
-- 手腕 3 个关节的接口仍保留，但当前 UDP bridge 暂未启用姿态跟随。
+- 肘关节带有姿态偏置项，手伸远时逐步趋向更伸直的肘部目标，减少肘部折叠。
+- 手腕姿态不参与肩肘位置 IK，避免大角度手腕旋转反向污染手臂位置解。
 
 ### 3.5 Demo 键盘模式（无 VR 设备时调试）
 
@@ -218,20 +231,13 @@ ros2 run examples vr_teleop_node --ros-args -p demo_mode:=true
 
 ---
 
-## 四、灵巧手独立控制
+## 四、灵巧手控制
 
-### 4.1 通过 `hand_teleop_node` 遥操
+### 4.1 通过 UDP JSON v3 遥操
 
-如果有真实 VR 手柄数据：
+`vr_teleop_node` 会直接解析 `robot_control.hands.left/right`，换算为雷赛手 6 关节位置后发布到 `/aima/hal/joint/hand/command`。
 
-```bash
-ros2 run examples hand_teleop_node --ros-args -p demo_mode:=true
-```
-
-- `axis_x` -> 拇指旋转
-- `axis_y` -> 拇指弯曲
-- `index_trig` -> 食指
-- `hand_trig` -> 中、无名、小指
+原始 raw 值范围为 `0..10000`。接收端按 `[1.75, 1.40, 1.40, 1.40, 1.40, 1.40]` 的最大关节量转换。
 
 ### 4.2 通过命令行直接发布
 
@@ -291,9 +297,8 @@ pip install requests anthropic
 
 | Topic | 类型 | 发布者 | 说明 |
 |-------|------|--------|------|
-| `/udp_vr_bridge/arm_target` | `VRData` | `udp_vr_bridge` | 手臂目标位姿 |
 | `/aima/hal/joint/arm/command` | `JointCommandArray` | `vr_teleop_node` | 14-DOF 手臂平滑后关节命令 |
-| `/aima/hal/joint/hand/command` | `HandCommandArray` | `udp_vr_bridge` / `hand_teleop_node` | 灵巧手 6 关节命令 |
+| `/aima/hal/joint/hand/command` | `HandCommandArray` | `vr_teleop_node` | 灵巧手 6 关节命令 |
 | `/aima/hal/audio/capture` | `AudioCapture` | HAL | 麦克风原始音频 |
 
 ---
@@ -302,7 +307,7 @@ pip install requests anthropic
 
 1. 必须处于 `Develop_MC` 模式，否则手臂命令会被 MC 层覆盖。
 2. `vr_teleop_node` 退出时不会自动回到初始位置；在 Demo 模式下可用 `H` 手动回位。
-3. UDP JSON 中 `finger_joints` 数组长度必须为 `6`，格式错误时该只手不会发布灵巧手命令。
-4. 发送端协议当前固定为 `hands[0]=left`、`hands[1]=right`，接收端也按这个顺序解析。
-5. 当前 UDP 协议不包含急停按键字段，如需急停需要走其他控制链路。
-6. `orientation` 当前属于保留字段，协议可以继续发送，但当前版本不会实际驱动手腕姿态。
+3. UDP JSON 必须为 `packet_version=3`，旧版 `hands[]` 协议不再支持。
+4. 机器人端只以 `safety.safe_to_execute` 作为执行许可；安全字段为 false 时不消费控制器位姿。
+5. `robot_control.hands.left/right` 数组长度必须为 `6`，格式错误时该包不会发布对应手部命令。
+6. 双手 `primary_pressed && secondary_pressed` 同时为 true 时触发急停。

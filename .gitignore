@@ -1,2 +1,4 @@
 docs/
 x2-rl-deploy/
+__pycache__/
+*.py[cod]

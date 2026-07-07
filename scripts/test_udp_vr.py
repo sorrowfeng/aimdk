@@ -28,7 +28,8 @@ import time
 def build_wave_data(t: float, axis: str = None) -> dict:
     """生成动态测试数据：可单轴独立测试，也可全轴一起摆动"""
     trigger = 0.5 + 0.5 * math.sin(t * 2.0)  # 0.0 ~ 1.0
-    finger_val = round(1.4 * trigger, 3)
+    trigger_raw = int(round(10000 * trigger))
+    grip_raw = int(round(10000 * (0.5 + 0.5 * math.sin(t * 1.4))))
 
     # 基础摆动幅度
     offset = 0.03 * math.sin(t * 0.4 * math.pi)
@@ -44,47 +45,63 @@ def build_wave_data(t: float, axis: str = None) -> dict:
     elif axis == "z":
         z = z_offset
     else:
-        # 全轴模式（旧版混合运动，用于整体观察）
+        # 全轴模式（混合运动，用于整体观察）
         x = offset
         y = offset * 0.5
         z = z_offset
 
+    def controller(px: float, py: float, pz: float, trig: float, grip: float) -> dict:
+        return {
+            "quality": "live",
+            "pose": {
+                "position": {
+                    "x": round(px, 4),
+                    "y": round(py, 4),
+                    "z": round(pz, 4),
+                },
+                "orientation": {
+                    "pitch": 0.0,
+                    "yaw": 0.0,
+                    "roll": 0.0,
+                },
+            },
+            "input": {
+                "thumbstick": {"x": 0.0, "y": 0.0},
+                "trigger": round(trig, 4),
+                "grip": round(grip, 4),
+                "primary_pressed": False,
+                "secondary_pressed": False,
+            },
+        }
+
     return {
-        "hands": [
-            {
-                "hand": "left",
-                "relative_position": {
-                    "x": round(x, 4),
-                    "y": round(y, 4),
-                    "z": round(z, 4),
-                },
-                "orientation": {
-                    "pitch": 0.0,
-                    "yaw": 0.0,
-                    "roll": 0.0,
-                },
-                "finger_joints": [1.400, finger_val, finger_val, finger_val, finger_val, finger_val],
+        "packet_version": 3,
+        "operator_mode": "active_stream",
+        "safety": {
+            "safe_to_execute": True,
+        },
+        "controllers": {
+            "left": controller(x, y, z, trigger, grip_raw / 10000.0),
+            "right": controller(
+                -x if axis != "z" else x,
+                -y if axis != "z" else y,
+                z,
+                0.0,
+                0.0,
+            ),
+        },
+        "robot_control": {
+            "hands": {
+                "unit": "raw",
+                "left": [8000, trigger_raw, trigger_raw, grip_raw, grip_raw, grip_raw],
+                "right": [8000, 0, 0, 0, 0, 0],
             },
-            {
-                "hand": "right",
-                "relative_position": {
-                    "x": round(-x, 4) if axis != "z" else round(x, 4),
-                    "y": round(-y, 4) if axis != "z" else round(y, 4),
-                    "z": round(z, 4),
-                },
-                "orientation": {
-                    "pitch": 0.0,
-                    "yaw": 0.0,
-                    "roll": 0.0,
-                },
-                "finger_joints": [1.400, 0.0, 0.0, 0.0, 0.0, 0.0],
-            },
-        ]
+        },
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="UDP VR Bridge 链路测试工具")
+    parser = argparse.ArgumentParser(description="UDP JSON v3 VR 遥操测试工具")
     parser.add_argument("--ip", default="172.16.20.110", help="目标 IP (默认: 172.16.20.110)")
     parser.add_argument("--port", "-p", type=int, default=9999, help="目标端口 (默认: 9999)")
     parser.add_argument("--file", "-f", help="JSON 数据文件路径")
